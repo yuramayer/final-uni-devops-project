@@ -1,0 +1,17 @@
+- hosts: local
+  tasks:
+    - name: Ensure docker installed
+      package:
+        name: docker.io
+        state: present
+
+    - name: Copy project files
+      copy:
+        src: ../../
+        dest: /opt/devops-project
+        mode: "0755"
+
+    - name: Run docker compose
+      command: docker compose up -d
+      args:
+        chdir: /opt/devops-project
