@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "/home/yura/code/final-uni-devops-project/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "./"
+  ]
+}
