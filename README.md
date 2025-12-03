@@ -298,7 +298,7 @@ Payload в итоге выглядит примерно так:
 
 Locust поднимает страницу на порту 8089, и уже в браузере удобно задать количество пользователей, скорость разгона и посмотреть графики rps и задержек.
 
-[Наш Интерфейс в вебе](img/locust_screen.png)
+![Наш Интерфейс в вебе](img/locust_screen.png)
 
 Второй вариант — headless режим, который нужен для отчётов и логов.  
 Команда выглядит так:
@@ -313,13 +313,13 @@ locust -f tests/locustfile.py \
   --csv=locust_run
   ```
 
-[Пример в консольке](img/locust_terminal.png)
+![Пример в консольке](img/locust_terminal.png)
 
 После этого в каталоге locust_data появляются файлы с метриками:  
 locust_run_stats.csv, locust_run_stats_history.csv, locust_run_failures.csv и locust_run_exceptions.csv.  
 Они показывают общее количество запросов, распределение задержек и возможные ошибки.
 
-[Аггрегация в консольке](img/locust_terminal_agg.png)
+![Аггрегация в консольке](img/locust_terminal_agg.png)
 
 Они лежат в `locust_data/`
 
