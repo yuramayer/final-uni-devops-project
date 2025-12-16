@@ -1,70 +1,67 @@
-# Итоговый отчет по DevOps заданию
+> 🇬🇧 **English** | 🇷🇺 [Русский](README_RU.md)
 
-## 0. Ссылка на код
+# Final report for the DevOps task
 
-Весь код и структуры каталогов доступны в репозитории:
+## 0. Link to the code
+
+All code and folder structure live in the repo:
 
 ### https://github.com/yuramayer/final-uni-devops-project
 
-Там же лежат плейбуки, locust-csv, докер-файлы и report.html - словом, весь сервис и использованные файлы
+Same repo keeps playbooks, locust csv, docker files and report.html – basically the whole service and used files
 
-## 1. Введение
+## 1. intro
 
-Я сделал учебный сервис с простой ml-моделью и обработкой событийной логики
-Основная идея была показать на маленьком примере весь путь: от того, как думаешь над API и структурой сервиса, до того, как поднимаешь инфраструктуру, смотришь на дрейф данных и прогоняешь нагрузочные тесты.
+I built a study service with a tiny ml model and some event logic
+Idea was to show the whole path on a small thing: from thinking about API and service structure to infra setup, data drift checks and load tests.
 
+while doing it I followed the criteria:
 
-В процессе работы я ориентировался на критерии:
+- API first style design,
+- logical split into modules and micro services,
+- use infra as code;
+- have an ML block and data drift check via evidentlyai,
+- track architecture choices as ADR;
+- show load test results and conclusions.
 
-- проектирование сервиса в стиле API first,
-- логическое разделение на модули и микросервисы,
-- использование инфраструктуры как кода;
-- наличие ML компонента и анализ дрейфа данных через evidentlyai,
-- фиксация архитектурных решений в формате ADR;
-- оформление результатов нагрузочного тестирования и выводов.
+I picked Readme as the report format, sits in the repo too!
 
-В качестве формата отчета я выбрал Readme, который также есть в репозитории проекта!
+## 2. general service overview
 
+Service just does simple scoring on a small ML model.
 
-## 2. Общее описание сервиса
+Main flow:
 
-Сервис по сути делает простой скоринг на небольшой ML-модели.
+- HTTP API takes a request with two numeric features feature_1 and feature_2,
+- inside we call a small logistic model, it computes probability and returns binary prediction,
+- then we build an event, add original features and some service info,
+- events go into redis, a separate worker handles them async and writes jsonl log,
+- collected logs later feed evidentlyai for drift check,
+- HTTP API behavior under load I checked through locust.
 
+## 3. API description (api first)
 
-Основная логика такая:
+I designed it in api first style. First I set endpoints and data format. Only after that I wrote code for them.
 
-- HTTP API принимает запрос с двумя числовыми признаками feature_1 и feature_2,
-- внутри вызывается простая логистическая модель, она считает вероятность таргета и выдает бинарный прогноз,
-- дальше формируется событие, в которое добавляются входные признаки и немного служебной инфы,
-- эти события отправляются в redis, а отдельный worker обрабатывает их асинхронно и пишет в лог в формате jsonl.
-- накопленные логи потом используются для анализа дрейфа данных через evidentlyai,
-- поведение HTTP API под нагрузкой я проверял через locust.
+### 3.1 endpoints
 
-
-## 3. Описание API сервиса (api first)
-
-Сервис я проектировал в подходе api first Сначала определил конечные точки и формат данных.  
-Только после этого написал логику под них
-
-### 3.1. Эндпоинты
-
-1. Проверка работоспособности
+1. Health check
 
 - URL: /health  
-- Метод: get   
-- Вход:отсутствует  
-- Выход: объект вида   
+- Method: get   
+- Input: none  
+- Output: object like   
   `{ "status": "ok" }`  
 
-Быстрая проверка того, что HTTP сервиса жив и отвчает
+fast check that HTTP service is alive and answering
 
-2. Предсказание модели
+2. Model prediction
 
 - URL: /predict  
-- Метод: POST  
-- Формат запроса: JSON  
+- Method: POST  
+- Request format: JSON  
 
-Пример запроса:
+Sample request:
 
 ```JSON
 {
@@ -73,28 +70,27 @@
 }
 ```
 
-- Формат ответа: JSON  
+- Response format: JSON  
 
-Пример ответа:
+Sample response:
 
 ```json
 {
-  "request_id": "uuid-строка",
+  "request_id": "uuid-string",
   "probability": 0.73,
   "predicted_class": 1
 }
 ```
 
-request_id помогает трассировать запросы.  
-probability и predicted_class -результат работы простейшей ml-оценки.
+request_id helps tracing requests.  
+probability and predicted_class are results of the small ml scoring.
 
-Структуры входа и выхода описаны в файле app/schemas.py.
-Я использовал классы pydantic: PredictRequest, PredictResponse и PredictionEvent.
+Input/output schemas live in app/schemas.py.  
+I used pydantic classes: PredictRequest, PredictResponse and PredictionEvent.
 
+### 3.2 API check
 
-### 3.2. Проверка API
-
-Работу API можно проверить простым запросом через curl:
+You can ping API with curl:
 
 ```bash
 curl http://localhost:8000/health
@@ -104,204 +100,201 @@ curl http://localhost:8000/health
 curl -X POST "http://localhost:8000/predict" \
   -H "Content-Type: application/json" \
   -d "{\"feature_1\": 1.5, \"feature_2\": -0.7}"
-  ```
+```
 
-Структура сервиса и точки входа заданы и задокументированы. В целом - по идее Api first
+Service structure and entry points are fixed and documented. overall pretty api first.
 
+## 4. Modules and micro services split
 
-## 4. Логическое разделение на модули и микросервисы
+Project sits in one repo. but logically it is split into small parts and micro services
 
-Проект лежит в одном репозитории. Но логически он разбит на отдельные части и небольшие сервисы 
+### 4.1 Docker level
 
-### 4.1. Уровень Docker и сервисов
-
-В файле docker-compose.yml описаны три сервиса:
+In docker-compose.yml there are three services:
 
 - redis  
-  - контейнер с Redis 7
-  - хранит события предсказаний
+  - container with Redis 7
+  - stores prediction events
 
 - api  
-  - контейнер с FastAPI приложением
-  - отвечает за http api
-  - берет REDIS URL из окружения
-  - отправляет события в канал prediction_events
+  - container with FastAPI app
+  - serves http api
+  - gets REDIS URL from env
+  - sends events to prediction_events channel
 
 - worker  
-  - контейнер с приложением на faststream
-  - слушает канал prediction_events в redis
-  - пишет события в файл data/logs/predictions.jsonl
+  - container with faststream app
+  - listens prediction_events in redis
+  - writes events into data/logs/predictions.jsonl
 
-Так получается простая событийная схема:  
-http слой живет отдельно, а обработчик событий работает в своем процессе. Связка идет через redis
+So we get a simple event scheme:  
+http layer lives alone, event handler works in own process. link goes through redis
 
-### 4.2. Уровень Python модулей
+### 4.2 Python modules level
 
-Заглянем в app:
+Inside app we have:
 
 - main.py  
-  - точка входа http сервиса на fastapi
-  - обработка /health и /predict
-  - подключение к redis в событиях startup и shutdown
+  - entrypoint for fastapi http service
+  - handles /health and /predict
+  - sets redis connection in startup/shutdown events
 
 - ml_model.py  
-  - простая логистическая модель
-  - predict_proba считает вероятность
-  - predict_class возвращает бинарный класс
+  - simple logistic model
+  - predict_proba returns probability
+  - predict_class gives binary class
 
 - schemas.py  
-  - модели pydantic для запросов, ответов и событий
+  - pydantic models for requests, responses and events
 
 - settings.py  
-  - маленькая обертка над переменными окружения
-  - задает redis_url и имя приложения
+  - tiny wrapper around env vars
+  - sets redis_url and app name
 
 - events_worker.py  
-  - воркер на faststream
-  - подписывается на prediction_events
-  - пишет события в predictions.jsonl
+  - worker on faststream
+  - subscribes to prediction_events
+  - writes events to predictions.jsonl
 
-Такая вот микросервисная архитектура. С точки зрения задания микросервисы и модули выделены,их роли и взаимодействия понятны
+so micro service architecture: modules and roles are clear.
 
+## 5. Architecture decisions (ADR)
 
-## 5. Принятие архитектурных решений (ADR)
+To pick tech for event layer I wrote a small adr
 
-Чтобы выбрать технологии для событийного слоя, я оформил короткое adr  
+### ADR 0001. Choosing library for Redis work
 
-### ADR 0001. Выбор библиотеки для работы с Redis
+First I set the context: service must pass events from HTTP layer to worker, and as broker I went with Redis. On the course we saw two options, both ok.
 
-Для выбора технологии событийного слоя я оформил короткое ADR
+Option one use asyncio redis directly. gives full command access, easy to work with lists/streams/channels. But you write more helper code, manage subscriptions manually, and can mess up async logic. For study project it feels heavy.
 
-Сначала я сформулировал контекст: сервису нужно передавать события из HTTP слоя в воркер, и в качестве брокера я решил использовать Redis. На курсе нам показывали два подхода, и оба выглядели рабочими
+Option two use FastStream on top of RedisBroker. code is short, looks declarative, nice decorators for publishers/subscribers. But you add dependency and hide some low-level redis stuff behind framework. In prod maybe minus, here fine.
 
-Первый вариант использовать asyncio red напрямую. В этом случае есть полный доступ к командам Redis, понятно как работать со списками, потоками и каналами. Но приходится писать больше вспомогательного кода, самому следить за подписками и обработчиками, и легко наделать ошибок в асинхронной части. Для учебного проекта это выглядит тяжеловесно
+Because of that I picked **FastStream**. it gives clear worker, minimum boilerplate and readable architecture
 
-Второй вариант использовать FastStream поверх RedisBroker. Тут код получается короче, всё выглядит декларативно, есть нормальные декораторы для подписчиков и отправителей сообщений. Однако появляется дополнительная зависимость, и часть низкоуровневых возможностей Redis скрыта за абстракцией фреймворка. В реальном проде иногда минус, но в учебной задаче не критично
+## 6. Infra as code (IaC)
 
-По этим причинам я выбрал **FastStream**. Он дает понятный воркер, минимальное количество шаблонного кода и читабельную архитектуру
+To deploy service I used docker compose plus ansible.  
+This combo lets you raise app from scratch on clean machine and keep instructions as code.
 
+### 6.1 Docker Compose
 
-## 6. Программное создание инфраструктуры (IaC)
+File `docker-compose.yml` describes three containers working together.  
+Redis uses base image redis:7 and exposes 6379. it is just the broker
 
+api container builds from Dockerfile.api. During build it installs deps from requirements.txt, copies app folder, then runs uvicorn with app.main:app. Connection to redis comes from env var redis_url, so config stays clean.
 
-Для развёртывания сервиса я использовал сочетание docker compose и ansible.  
-Такой подход, как нас научили 🙂 позволяет поднять приложение с нуля на чистой машине и при этом держать все инструкции в виде кода.
+worker container builds similar but its entrypoint runs app.events_worker. It listens events and writes log.
 
-### 6.1. Docker Compose
-
-В файле `docker-compose.yml` описаны три контейнера, которые вместе образуют сервис.  
-Redis работает на базовом образе redis:7 и пробрасывает порт 6379 наружу. Это самый простой элемент схемы, он нужен только как брокер
-
-Контейнер api собирается из Dockerfile.api. В процессе сборки ставятся зависимости из requirements.txt, затем копируется каталог app, после чего запускается uvicorn с приложением app.main:app. Подключение к redis задаётся через переменную окружения redis_url, так что конфигурация получилась довольно прозрачной,
-
-Контейнер worker собирается похожим образом, только точка входа у него другая— запускается модуль app.events_worker. Он слушает события и пишет их в лог.
-
-По сути, docker compose уже сам по себе даёт минимальную инфраструктуру. При наличии Docker можно просто выполнить команду  
+So docker compose already gives minimal infra. With Docker available you just run  
 `docker compose up -d`,  
-и всё поднимется в нужном порядке.
+and everything starts in the needed order.
 
+### 6.2 Ansible
 
-### 6.2. Ansible
-
-Z добавил каталог infra с небольшими конфигурациями ansible. В inventory.ini описан локальный хост:
+I added infra folder with tiny ansible configs. Inventory.ini describes local host:
 
 - infra/inventory.ini  
 
-Содержит описание локального хоста:
+contains local host description:
 
 ```ini
 [local]
 localhost ansible_connection=local
 ```
 
-В playbook.yml лежит простой плейбук. Он устанавливает docker через пакетный менеджер, копирует проект на сервер (я использовал каталог /opt/devops-project), а потом в этом каталоге выполняет `docker compose up -d`. Сам плейбук небольшой, но даёт понятную картинку того, как можно автоматизировать развёртывание
+playbook.yml holds a simple playbook. It installs docker via package manager, copies project to server (I used /opt/devops-project), then inside that folder runs `docker compose up -d`. Playbook is short but shows how to automate deploy.
 
-Запускается всё командой:
+Run it like:
 
-Запуск плейбука:
+```bash
+ansible-playbook infra/playbook.yml -i infra/inventory.ini
+```
 
-```ansible-playbook infra/playbook.yml -i infra/inventory.ini```
+As result service can start even on fully clean machine with only ansible installed. Need only wifi so docker can install :)
 
-В результате сервис можно поднять даже на полностью чистой машине, где кроме ansible ничего нет. Нужен только eifi чтоб запустился docker
+> btw for final assignment I installed Linux Mint instead of windows 10 on my laptop. no regrets! :)
 
-> К слову, для выполнения итогового задания я поставил на личный ноутбук linux Mint вместо windows 10. О чем не жалею! 🙂
+## 7. ML part and data drift check with evidently AI
 
-## 7. ML компонент и анализ дрейфа данных evidently AI
+### 7.1 ML model
 
-### 7.1. Описание ML модели
+File app/ml_model.py has SimpleLogisticModel.  
+It uses two features — feature_1 and feature_2 — and fixed coefficients.  
 
-В файле app/ml_model.py находится простая логистическая модель SimpleLogisticModel.  
-Она использует два признака — feature_1 и feature_2 — и фиксированные коэффициенты.  
+> main goal not best model quality, so model is very simple. Need just to show ML part exists as own block and integrates into our mini architecture
 
-> Я исходил из того что задача не про качество самой модели, поэтому модель очень простенькая. Цель была показать, что MLкомпонента существует как отдельная часть сервиса и нормально интегрирована в нашу мини-архитектуру
+Model has two main methods
+- predict_proba calculates target probability 
+- predict_class turns it into binary answer with 0.5 threshold
 
-У модели два основных метода
-- predict_proba считает вероятность целевого класса 
-- predict_class превращает эту вероятность в бинарный ответ по порогу 0.5
+### 7.2 Prediction logging
 
-### 7.2. Логирование предсказаний
+Worker in app/events_worker.py listens prediction_events channel.  
+Each message is PredictionEvent. It includes request_id, features dict, probability, predicted_class and timestamp
 
-Воркер, который лежит в app/events_worker.py, слушает канал prediction_events.  
-Каждое сообщение представляет собой объект PredictionEvent. Он включает request_id, словарь features, вероятность, предсказанный класс и timestamp
+Worker writes all events into `data/logs/predictions.jsonl`. jsonl is handy because each line is separate JSON. easy to read later with pandas, exactly what we need for analysis
 
-Все события воркер пишет в файл `data/logs/predictions.jsonl`. Формат jsonl удобен тем, что каждая строка   отдельный JSON. Такой файл легко читать потом через pandas, что и нужно для анализа
+### 7.3 Drift analysis script
 
-### 7.3. Скрипт анализа дрейфа
+For drift I wrote script analysis/run_evidently.py.  
+It reads `predictions.jsonl` into pandas DataFrame, then expands features dict into normal columns feature_1 and feature_2. After that it builds two samples: reference — first N rows, current — last N rows. In work I used 200 rows each, but checks df length to avoid overflow.
 
-ДДля анализа дрейфа я сделал отдельный скрипт analysis/run_evidently.py.  
-Он сначала читает `predictions.jsonl` в pandas DataFrame, потом раскрывает словарь признаков в нормальные столбцы feature_1 и feature_2. Далее формируются две выборки: reference — первые N строк, current — последние N строк. В работе я ограничился 200 строками в каждую сторону, но при этом проверяю длину датафрейма, чтобы не выйти за границы.
+Then I set column mapping: feature_1 and feature_2 go to numerical_features, probability goes as prediction. Based on that we create report via DataDriftPreset, save it into report.html
 
-После этого настраивается column mapping: feature_1 и feature_2 идут в numerical_features, а probability используется как prediction. На основе этих настроек создаётся отчёт через DataDriftPreset, который потом сохраняется в report.html
+Run script simply:
 
-Скрипт запускается просто:
+```bash
+python analysis/run_evidently.py
+```
 
-```python analysis/run_evidently.py```
+### 7.4 Reading results
 
-### 7.4. Интерпретация результатов
+Evidently showed no strong drift.  
+So distributions in reference and current almost same, probability distribution stable too.
 
-В отчёте Evidently показал, что значимого дрейфа нет.  
-То есть распределения признаков в reference и current почти не отличаются, и распределение вероятностей модели тоже выглядит стабильным.
+Means load test and time changes did not change data profile. Service gets roughly same values. HTTP layer, redis and worker cooperate ok.
 
-Соответственно наше нагрузочное тестирование и просто изменение времени не привели к изменению профиля данных. Сервис получает примерно такие же значения, как и раньше. HTTP слой, redis и воркер работают согласованно.
-
-Если смотреть шире, то отсутствие дрейфа говорит о стабильности входного потока. В более реальной системе такую проверку мы делали бы регулярно, чтобы раньше замечать сбои или изменения в источниках данных
+In wider view, no drift means stable input flow. In real system we would run this check regularly to catch issues in data sources.
 
 ---
 
-## 8. Нагрузочное тестирование Locust
+## 8. Load testing with Locust
 
-### 8.1. Сценарий нагрузки
+### 8.1 Load scenario
 
-Для проверки того, как сервис ведёт себя под нагрузкой, я использовал locust.  
-В каталоге tests лежит файл `tests/locustfile.py`, где описан сценарий.  
-Там определён класс PredictUser, который наследуется от FastHttpUser и шлёт запросы на /predict.  
-Значения feature_1 и feature_2 генерируются случайно в небольшом диапазоне, а между запросами пользователь делает паузу — её задаёт wait_time.
+To see how service behaves under load I used locust.  
+Folder tests has `tests/locustfile.py` with scenario.  
+There class PredictUser extends FastHttpUser and sends requests to /predict.  
+feature_1 and feature_2 values are random in small range, between requests user waits using wait_time.
 
-Payload в итоге выглядит примерно так:
+Payload looks like:
 
 ```json
 {
-  "feature_1": случайное число от -5 до 5,
-  "feature_2": случайное число от -5 до 5
+  "feature_1": random number -5..5,
+  "feature_2": random number -5..5
 }
 ```
 
-### 8.2. Запуск Locust
+### 8.2 Running Locust
 
-Перед запуском нагрузки сервис api должен быть поднят через docker compose.  
-После этого locust можно запускать двумя способами.
+Before load test the api service must run via docker compose.  
+After that run locust in two ways.
 
-Первый - через веб-интерфейс.  
-Команда:
+First - via web ui.  
+Command:
 
-```locust -f tests/locustfile.py --host http://localhost:8000```
+```bash
+locust -f tests/locustfile.py --host http://localhost:8000
+```
 
-Locust поднимает страницу на порту 8089, и уже в браузере удобно задать количество пользователей, скорость разгона и посмотреть графики rps и задержек.
+Locust opens page on 8089, in browser you can set users, spawn rate and watch rps/latency charts.
 
-![Наш Интерфейс в вебе](img/locust_screen.png)
+![Our web interface](img/locust_screen.png)
 
-Второй вариант — headless режим, который нужен для отчётов и логов.  
-Команда выглядит так:
+Second way — headless for reports/logs.  
+Command:
 
 ```bash
 locust -f tests/locustfile.py \
@@ -311,82 +304,81 @@ locust -f tests/locustfile.py \
   -r 20 \
   -t 60s \
   --csv=locust_run
-  ```
+```
 
-![Пример в консольке](img/locust_terminal.png)
+![Console example](img/locust_terminal.png)
 
-После этого в каталоге locust_data появляются файлы с метриками:  
-locust_run_stats.csv, locust_run_stats_history.csv, locust_run_failures.csv и locust_run_exceptions.csv.  
-Они показывают общее количество запросов, распределение задержек и возможные ошибки.
+After run folder locust_data gets metric files:  
+locust_run_stats.csv, locust_run_stats_history.csv, locust_run_failures.csv and locust_run_exceptions.csv.  
+They show total requests, latency distribution and possible errors.
 
-![Аггрегация в консольке](img/locust_terminal_agg.png)
+![Console aggregation](img/locust_terminal_agg.png)
 
-Они лежат в `locust_data/`
+They live in `locust_data/`
 
-### 8.3. Наблюдения и выводы
+### 8.3 Observations
 
-ВВо время тестирования сервис вел себя довольно стабильно.  
-Поток запросов на `/predict` обрабатывался без срывов, время ответа не уходило вверх, и http слой продолжал спокойно отдавать корректные ответы. При увеличении числа виртуальных пользователей нагрузка, конечно, растёт, но характер работы остаётся предсказуемым.
+During tests service behaved stable.  
+Request flow to `/predict` was handled without drops, response time stayed ok, http layer kept returning valid answers. When increasing virtual users the load grows, but behavior stays predictable.
 
-Если смотреть на результаты locust вместе с отчётом evidently, получается более цельная картина:  
-сервис выдерживает заявленную нагрузку, взаимодействие между api, redis и воркером не разваливается, а данные, которые попадают в predictions.jsonl во время теста, выглядят нормальными и пригодны для анализа.
+If you look at locust results together with evidently report you get a full picture:  
+service handles stated load, api + redis + worker stay together, and data stored in predictions.jsonl during test looks normal and ready for analysis.
 
-Таким образом критерий про нагрузочное тестирование закрыт — есть и логи, и наблюдения, и объяснение поведения сервиса
+So the load testing criterion is closed — we have logs, observations, explanation.
 
+## 9. Deployment and reproducibility
 
-## 9. Разворачивание и воспроизводимость
+Here I describe how to start service on new machine.  
+Idea: you can run project manually via docker compose or fully automated through ansible in infra/.
 
-Здесь я собрал короткое описание того, как поднять сервис на новой машине.  
-Идея в том, что проект можно развернуть как вручную через docker compose, так и полностью автоматизировано через ansible из каталога infra/.
-
-Самый простой путь — локальный запуск.  
-Сначала нужно клонировать репозиторий:
+Simplest path — local run.  
+First clone repo:
 
 `git clone git@github.com:yuramayer/final-uni-devops-project.git`
 
-После этого нужно установить docker и docker compose, сервисы поднимаются так:
+Then install docker and docker compose, start services:
 
 ```bash
 cd final-uni-devops-project
 docker compose up -d
 ```
 
-Дальше можно проверить, что api работает:
+Then check api works:
 
 `curl http://localhost:8000/health`
 
-Если всё ок, то становится доступен и эндпоинт `/predict`, а сам сервис начинает писать события в redis и дальше в logs.
+If ok, `/predict` also available, and service starts writing events into redis and logs.
 
-Для нагрузочного тестирования можно запустить locust в любой из двух модов-веб-интерфейс или headless.  
-А когда накопятся логи предсказаний, выполняется анализ дрейфа:
+For load test run locust in any mode (web or headless).  
+When logs accumulate, run drift analysis:
 
 `python analysis/run_evidently.py`
 
-Этот скрипт создаёт отчёт `report.html`, и его можно открыть в браузере. Он также есть в репозитории
+Script creates `report.html`, open it in browser. It is also stored in repo.
 
-Отдельно стоит сказать про ansible, который лежит в каталоге infra/.  
-Там есть `inventory.ini`, где описан локальный хост, и простой `playbook.yml`.  
-Плейбук устанавливает docker, копирует проект на сервер (например в `/opt/devops-project`) и уже внутри этого каталога выполняет docker compose up -d.  
-То есть, если есть удалённая машина c доступом по ssh, развёртывание выглядит так:
+Need to mention ansible in infra/.  
+There is `inventory.ini` with local host, and simple `playbook.yml`.  
+Playbook installs docker, copies project to server (say `/opt/devops-project`) and inside runs docker compose up -d.  
+So with remote machine and ssh access, deploy looks like:
 
 ```bash
 ansible-playbook infra/playbook.yml -i infra/inventory.ini
 ```
 
-Этот вариант удобен тем, что всю инфраструктуру можно поднять с нуля одной командой 🙂
-На целевой машине не нужно предварительно ничего готовить, ansible сам поставит docker и поднимет сервис.
+This way you raise whole infra from zero with single command 🙂  
+Target host needs nothing preinstalled, ansible will install docker and start service.
 
-В общем проект можно развернуть и вручную,и полностью автоматически
+Overall project can be deployed manually or fully automated.
 
-## 10. Заключение
+## 10. Conclusion
 
-По итогу у нас готов автономный сервис с полным девопс-процессом.
-Сервис имеет продуманный http api, разделён на части — api, worker и redis; поднимается через docker compose.  
-Инфраструктура при этом оформлена как код, а ansible из infra/ позволяет развернуть всё на чистой машине без ручных шагов.
+In the end we have an autonomous service with a full devops flow.  
+Service has designed http api, split into parts — api, worker, redis; starts via docker compose.  
+Infra is code, ansible in infra/ lets you deploy on clean machine with no manual steps.
 
-Отдельно есть ml-компонента, которая делает предсказания, и воркер, который собирает события и пишет их в jsonl.
-Эти данные потом используются для анализа дрейфа через evidently, и по ним формируется отчет report в html.
+There is ML part that makes predictions, and worker that collects events and writes jsonl.  
+Those logs feed drift analysis via evidently, producing HTML report.
 
-Кроме того, сервис был прогнан под нагрузкой в locust, что дало базовое понимание его поведения при увеличении числа запросов.
+Also the service passed load testing in locust, giving understanding of behavior under growing request count.
 
-Спасибо за интересное задание!
+thanks for the nice assignment!
